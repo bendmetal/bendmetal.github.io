@@ -1,0 +1,13 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	symlinks = false
+	ignorecase = true
+[remote "origin"]
+	url = https://github.com/bendmetal/bendmetal.github.io.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[user]
+	email = gregory.hock@icloud.com
+	name = Greg Hock

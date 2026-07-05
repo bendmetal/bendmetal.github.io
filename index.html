@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Flight Tools">
+<meta name="theme-color" content="#0a0e14">
+<title>EC225 Flight Performance Tools</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: #0a0e14;
+    min-height: 100vh;
+    min-height: -webkit-fill-available;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-text-size-adjust: 100%;
+  }
+  .app {
+    color: #e6edf3;
+    padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+    max-width: 560px;
+    margin: 0 auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header { text-align: center; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid #1f2937; }
+  h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.5px; }
+  .subtitle { font-size: 11px; color: #7d8590; margin-top: 6px; letter-spacing: 1.2px; text-transform: uppercase; }
+
+  .cards { display: flex; flex-direction: column; gap: 14px; }
+  .card {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    background: linear-gradient(180deg, #0d1117 0%, #10151d 100%);
+    border: 1px solid #1f2937;
+    border-radius: 12px;
+    padding: 20px;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.05s, border-color 0.15s, background 0.15s;
+  }
+  .card:active { transform: scale(0.98); background: #10151d; border-color: #374151; }
+  .card:hover { border-color: #374151; }
+
+  .card-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #e6edf3;
+    letter-spacing: 0.3px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .card-title .arrow {
+    font-size: 20px;
+    color: #6b7280;
+    font-weight: 300;
+  }
+  .card-desc {
+    font-size: 13px;
+    color: #9ca3af;
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+  .card-meta {
+    font-size: 10px;
+    color: #6b7280;
+    margin-top: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 500;
+  }
+
+  .info {
+    margin-top: 24px;
+    padding: 12px 14px;
+    background: rgba(88, 166, 255, 0.06);
+    border-left: 3px solid #58a6ff;
+    font-size: 11px;
+    color: #9ca3af;
+    border-radius: 4px;
+    line-height: 1.5;
+  }
+  .info strong { color: #e6edf3; }
+
+  .footer {
+    margin-top: auto;
+    padding-top: 24px;
+    font-size: 10px;
+    color: #6b7280;
+    text-align: center;
+    line-height: 1.6;
+    letter-spacing: 0.3px;
+  }
+
+  @media (min-width: 700px) {
+    h1 { font-size: 26px; }
+    .card-title { font-size: 20px; }
+    .card-desc { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>EC225 Performance Tools</h1>
+    <div class="subtitle">MAKILA 2A1 · MPAI · Bullets Closed</div>
+  </header>
+
+  <div class="cards">
+    <a class="card" href="./ec225-hover-v1/">
+      <div class="card-title">
+        Hover Performance
+        <span class="arrow">›</span>
+      </div>
+      <div class="card-desc">IGE and OGE weight limits by pressure altitude and OAT.</div>
+      <div class="card-meta">Fig 5b-1 · Fig 6b</div>
+    </a>
+
+    <a class="card" href="./ec225-ca-cat-a/">
+      <div class="card-title">
+        Cat A Max T/O &amp; Landing
+        <span class="arrow">›</span>
+      </div>
+      <div class="card-desc">Category A gross weight for takeoff and landing, clear area.</div>
+      <div class="card-meta">Fig 1b</div>
+    </a>
+
+    <a class="card" href="./ec225-ca-helipad/">
+      <div class="card-title">
+        Max Landing Gross Weight
+        <span class="arrow">›</span>
+      </div>
+      <div class="card-desc">Category A gross weight for helipad operations.</div>
+      <div class="card-meta">Fig 3b</div>
+    </a>
+  </div>
+
+  <div class="info">
+    <strong>Tip:</strong> Open each tool once while online, then tap Share → Add to Home Screen in Safari. After that they work fully offline.
+  </div>
+
+  <div class="footer">
+    PILOT AIDS · NOT A SUBSTITUTE FOR THE AFM<br>
+    Verify against source charts for operational use
+  </div>
+</div>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('sw.js').catch(function() {});
+    });
+  }
+</script>
+</body>
+</html>
