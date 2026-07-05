@@ -96,6 +96,14 @@
     line-height: 1.6;
     letter-spacing: 0.3px;
   }
+  .refresh-link {
+    display: inline-block; margin-top: 10px;
+    color: #58a6ff; text-decoration: none;
+    font-size: 10px; letter-spacing: 0.3px;
+    border: 1px solid #1f2937; border-radius: 6px;
+    padding: 6px 12px;
+  }
+  .refresh-link:active { background: #1f2937; }
 
   @media (min-width: 700px) {
     h1 { font-size: 26px; }
@@ -155,7 +163,8 @@
 
   <div class="footer">
     PILOT AIDS · NOT A SUBSTITUTE FOR THE AFM<br>
-    Verify against source charts for operational use
+    Verify against source charts for operational use<br>
+    <a href="javascript:void(0)" class="refresh-link" onclick="forceRefresh()">⟳ Refresh App</a>
   </div>
 </div>
 
@@ -164,6 +173,22 @@
     window.addEventListener('load', function() {
       navigator.serviceWorker.register('sw.js').catch(function() {});
     });
+  }
+
+  // Force-refresh: unregister service worker, clear caches, reload from network
+  async function forceRefresh() {
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const r of regs) await r.unregister();
+      }
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+    } finally {
+      location.reload();
+    }
   }
 </script>
 </body>
