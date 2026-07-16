@@ -1,7 +1,7 @@
 // EC225 Flight Tools Landing - Service Worker
 // Caches the landing page for offline use
 
-const CACHE_NAME = 'ec225-landing-v7';
+const CACHE_NAME = 'ec225-landing-v9';
 const FILES_TO_CACHE = [
   './',
   './index.html'
