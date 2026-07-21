@@ -124,10 +124,71 @@
     .card-title { font-size: 20px; }
     .card-desc { font-size: 14px; }
   }
+
+  .pin-screen {
+    color: #e6edf3;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+  }
+  .pin-screen h2 { font-size: 18px; font-weight: 600; margin-bottom: 20px; letter-spacing: 0.3px; }
+  .pin-dots { display: flex; gap: 14px; margin-bottom: 24px; }
+  .pin-dot {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 1px solid #374151; background: transparent;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .pin-dot.filled { background: #58a6ff; border-color: #58a6ff; }
+  .pin-dot.error { background: #ef4444; border-color: #ef4444; }
+  .pin-pad {
+    display: grid;
+    grid-template-columns: repeat(3, 68px);
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+  .pin-key {
+    width: 68px; height: 68px; border-radius: 50%;
+    background: #10151d; border: 1px solid #1f2937;
+    color: #e6edf3; font-size: 22px; font-weight: 500;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .pin-key:active { background: #1f2937; }
+  .pin-key.ghost { background: transparent; border: none; }
+  .pin-error-text { font-size: 12px; color: #ef4444; height: 16px; margin-top: 4px; }
 </style>
 </head>
 <body>
-<div class="app">
+<div class="pin-screen" id="pin-screen">
+  <h2>Enter PIN</h2>
+  <div class="pin-dots" id="pin-dots">
+    <div class="pin-dot"></div>
+    <div class="pin-dot"></div>
+    <div class="pin-dot"></div>
+    <div class="pin-dot"></div>
+  </div>
+  <div class="pin-pad">
+    <button class="pin-key" onclick="pinPress('1')">1</button>
+    <button class="pin-key" onclick="pinPress('2')">2</button>
+    <button class="pin-key" onclick="pinPress('3')">3</button>
+    <button class="pin-key" onclick="pinPress('4')">4</button>
+    <button class="pin-key" onclick="pinPress('5')">5</button>
+    <button class="pin-key" onclick="pinPress('6')">6</button>
+    <button class="pin-key" onclick="pinPress('7')">7</button>
+    <button class="pin-key" onclick="pinPress('8')">8</button>
+    <button class="pin-key" onclick="pinPress('9')">9</button>
+    <div class="pin-key ghost"></div>
+    <button class="pin-key" onclick="pinPress('0')">0</button>
+    <button class="pin-key" onclick="pinBackspace()">⌫</button>
+  </div>
+  <div class="pin-error-text" id="pin-error"></div>
+</div>
+
+<div class="app" id="app" style="display:none;">
   <header>
     <h1>EC225 Performance Tools</h1>
     <div class="subtitle">MAKILA 2A1 · MPAI · Bullets Closed</div>
@@ -269,6 +330,60 @@
 </div>
 
 <script>
+  const PIN_CODE = '1356';
+  const PIN_STORAGE_KEY = 'ec225-pin-ok';
+  let pinEntry = '';
+
+  function showApp() {
+    document.getElementById('pin-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+  }
+
+  function updatePinDots(errorState) {
+    const dots = document.querySelectorAll('.pin-dot');
+    dots.forEach((dot, i) => {
+      dot.className = 'pin-dot';
+      if (errorState) {
+        dot.classList.add('error');
+      } else if (i < pinEntry.length) {
+        dot.classList.add('filled');
+      }
+    });
+  }
+
+  function pinPress(digit) {
+    if (pinEntry.length >= 4) return;
+    pinEntry += digit;
+    updatePinDots(false);
+    document.getElementById('pin-error').textContent = '';
+    if (pinEntry.length === 4) {
+      if (pinEntry === PIN_CODE) {
+        try { localStorage.setItem(PIN_STORAGE_KEY, '1'); } catch (e) {}
+        showApp();
+      } else {
+        updatePinDots(true);
+        document.getElementById('pin-error').textContent = 'Incorrect PIN';
+        setTimeout(() => {
+          pinEntry = '';
+          updatePinDots(false);
+        }, 500);
+      }
+    }
+  }
+
+  function pinBackspace() {
+    pinEntry = pinEntry.slice(0, -1);
+    updatePinDots(false);
+    document.getElementById('pin-error').textContent = '';
+  }
+
+  // Skip the PIN screen if already unlocked on this device.
+  (function () {
+    let alreadyUnlocked = false;
+    try { alreadyUnlocked = localStorage.getItem(PIN_STORAGE_KEY) === '1'; } catch (e) {}
+    if (alreadyUnlocked) showApp();
+  })();
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function() {
       navigator.serviceWorker.register('sw.js').catch(function() {});
