@@ -331,6 +331,15 @@
     <strong>Tip:</strong> Open each tool once while online, then tap Share → Add to Home Screen in Safari. After that they work fully offline.
   </div>
 
+  <div class="offline-box">
+    <div class="offline-title">Save All Tools for Offline Use</div>
+    <div class="offline-sub">Downloads all 14 tools to this device in one go, so they open without internet.
+      Do this on wi-fi before a trip. About 25&nbsp;MB. Re-tap any time to refresh to the latest versions.</div>
+    <button class="offline-btn" id="cacheAllBtn" onclick="cacheAllApps()">Download All Tools for Offline</button>
+    <div class="offline-bar" id="cacheBar"><div id="cacheBarFill"></div></div>
+    <div class="offline-status" id="cacheStatus"></div>
+  </div>
+
   <div class="footer">
     PILOT AIDS · NOT A SUBSTITUTE FOR THE AFM<br>
     Verify against source charts for operational use<br>
@@ -339,6 +348,108 @@
 </div>
 
 <script>
+  // -------------------------------------------------------------------
+  // Bulk offline pre-cache
+  //
+  // Every tool lives under this same origin (bendmetal.github.io/<app>/),
+  // and the Cache Storage API is scoped per origin -- so this page is allowed
+  // to populate the caches the individual apps will later read from.
+  //
+  // Each app owns its own service worker with its own versioned CACHE_NAME.
+  // Rather than hard-code those names here (which would silently rot every
+  // time an app's cache is bumped), we fetch each app's sw.js and read the
+  // current name out of it. Writing into the app's OWN cache -- not some
+  // landing-page cache -- means that when its service worker later activates
+  // it finds the files already present, and its activate handler (which
+  // deletes every cache except its current one) won't throw our copy away.
+  //
+  // Always re-downloads: this is a "prepare for the trip" button, so a stale
+  // copy silently kept would defeat the purpose.
+  // -------------------------------------------------------------------
+  const OFFLINE_APPS = [
+    'ec225-ca-cat-a', 'ec225-ca-helipad', 'ec225-ca-helipad-takeoff',
+    'ec225-cb-to-lnd', 'ec225-hover-v1', 'ec225-se-hi', 'ec225-se-ct',
+    'ec225-se-lo', 'ec225-distances', 'ec225-weight-index', 'ec225-rc-vy',
+    'ec225-cruise-torque', 'ec225-max-endurance', 'ec225-mission-fuel'
+  ];
+
+  async function cacheOneApp(app, bust){
+    // Learn this app's current cache name from its own service worker.
+    let cacheName = app + '-precache';
+    try {
+      const swRes = await fetch('./' + app + '/sw.js?b=' + bust, { cache: 'no-store' });
+      if (swRes.ok){
+        const m = (await swRes.text()).match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
+        if (m) cacheName = m[1];
+      }
+    } catch (e) { /* fall back to the generic name */ }
+
+    // Fetch fresh (cache-busted) so a re-tap really does refresh.
+    const pageRes = await fetch('./' + app + '/index.html?b=' + bust, { cache: 'no-store' });
+    if (!pageRes.ok) throw new Error('HTTP ' + pageRes.status);
+
+    const cache = await caches.open(cacheName);
+    // Store under the URLs the app's own service worker will look up:
+    // both the directory form and the explicit index.html.
+    const body = await pageRes.blob();
+    const headers = { headers: { 'Content-Type': 'text/html' } };
+    await cache.put(new Request('./' + app + '/'), new Response(body.slice(), headers));
+    await cache.put(new Request('./' + app + '/index.html'), new Response(body.slice(), headers));
+    return cacheName;
+  }
+
+  async function cacheAllApps(){
+    const btn = document.getElementById('cacheAllBtn');
+    const bar = document.getElementById('cacheBar');
+    const fill = document.getElementById('cacheBarFill');
+    const status = document.getElementById('cacheStatus');
+
+    if (!('caches' in window)){
+      status.className = 'offline-status show offline-err';
+      status.innerHTML = 'This browser does not support offline storage. Open each tool once instead.';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Downloading...';
+    bar.classList.add('show');
+    status.className = 'offline-status show';
+    fill.style.width = '0%';
+
+    const bust = Date.now();
+    const failed = [];
+    let done = 0;
+
+    for (const app of OFFLINE_APPS){
+      status.innerHTML = 'Saving ' + app.replace('ec225-', '') + '  (' + (done + 1) + ' of ' + OFFLINE_APPS.length + ')';
+      try {
+        await cacheOneApp(app, bust);
+      } catch (e){
+        failed.push(app.replace('ec225-', '') + ' (' + e.message + ')');
+      }
+      done++;
+      fill.style.width = Math.round(done / OFFLINE_APPS.length * 100) + '%';
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Download All Tools for Offline';
+
+    const ok = OFFLINE_APPS.length - failed.length;
+    if (!failed.length){
+      status.className = 'offline-status show offline-ok';
+      status.innerHTML = 'All ' + ok + ' tools saved. They will now open without internet. '
+        + 'Re-tap before your next trip to pick up any updates.';
+    } else if (ok > 0){
+      status.className = 'offline-status show offline-warn';
+      status.innerHTML = ok + ' of ' + OFFLINE_APPS.length + ' saved. Could not save: ' + failed.join(', ')
+        + '. Check your connection and tap again.';
+    } else {
+      status.className = 'offline-status show offline-err';
+      status.innerHTML = 'Nothing could be saved &mdash; you may be offline already. '
+        + 'Connect to wi-fi and tap again.';
+    }
+  }
+
   const PIN_CODE = '1356';
   const PIN_STORAGE_KEY = 'ec225-pin-ok';
   let pinEntry = '';
