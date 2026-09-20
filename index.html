@@ -134,6 +134,29 @@
   .up-banner button:active { background: #f59e0b; }
   .up-banner button:disabled { opacity: 0.6; }
 
+  /* Progress lives INSIDE the banner. The old bottom panel had markup and
+     JS but no CSS at all -- the bar was a zero-height div, so it never
+     rendered and a download looked like nothing was happening. (Shipped
+     2026-09-01, found by Greg 2026-09-20.) */
+  .up-bar {
+    display: none; height: 8px; margin-top: 11px; border-radius: 5px;
+    background: rgba(255,255,255,0.12); overflow: hidden;
+  }
+  .up-bar.show { display: block; }
+  .up-bar-fill {
+    height: 100%; width: 0%; border-radius: 5px; background: #fbbf24;
+    transition: width 0.2s ease;
+  }
+  .up-banner.busy .up-bar-fill { background: #58a6ff; }
+  .up-status {
+    display: none; margin-top: 8px; font-size: 12px; line-height: 1.5;
+    color: #c9d1d9;
+  }
+  .up-status.show { display: block; }
+  .up-status.up-ok   { color: #4ade80; }
+  .up-status.up-warn { color: #fbbf24; }
+  .up-status.up-err  { color: #f87171; }
+
   .info {
     margin-top: 24px;
     padding: 12px 14px;
@@ -258,7 +281,11 @@
     Ideas for improvements are also welcome — email <a href="mailto:ghock@achi-tx.com">ghock@achi-tx.com</a>.
   </div>
 
-  <div class="up-banner" id="up-banner"></div>
+  <div class="up-banner" id="up-banner">
+    <div id="up-content"></div>
+    <div class="up-bar" id="up-bar"><div class="up-bar-fill" id="up-bar-fill"></div></div>
+    <div class="up-status" id="up-status"></div>
+  </div>
 
   <div class="cards">
     <a class="card" href="./ec225-hover-v1/" style="border-color: #a371f7;">
@@ -405,15 +432,6 @@
     <strong>Tip:</strong> Open each tool once while online, then tap Share → Add to Home Screen in Safari. After that they work fully offline.
   </div>
 
-  <div class="offline-box">
-    <div class="offline-title">Save All Tools for Offline Use</div>
-    <div class="offline-sub">Downloads all <span id="toolCount">15</span> tools to this device in one go, so they open without internet.
-      Do this on wi-fi before a trip. About 25&nbsp;MB. Re-tap any time to refresh to the latest versions.</div>
-    <button class="offline-btn" id="cacheAllBtn" onclick="cacheAllApps()">Download All Tools for Offline</button>
-    <div class="offline-bar" id="cacheBar"><div id="cacheBarFill"></div></div>
-    <div class="offline-status" id="cacheStatus"></div>
-  </div>
-
   <div class="footer">
     PILOT AIDS · NOT A SUBSTITUTE FOR THE AFM<br>
     Verify against source charts for operational use<br>
@@ -450,14 +468,21 @@
 
   async function cacheOneApp(app, bust){
     // Learn this app's current cache name from its own service worker.
-    let cacheName = app + '-precache';
-    try {
-      const swRes = await fetch('./' + app + '/sw.js?b=' + bust, { cache: 'no-store' });
-      if (swRes.ok){
-        const m = (await swRes.text()).match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
-        if (m) cacheName = m[1];
-      }
-    } catch (e) { /* fall back to the generic name */ }
+    //
+    // This must SUCCEED, not fall back. The old code defaulted to
+    // '<app>-precache' when sw.js could not be read, then wrote the page
+    // there -- a cache the app's own service worker never looks in and never
+    // cleans up. The tool was not actually available offline, the stray cache
+    // sat there forever, and the UI still reported "saved". A partial network
+    // failure producing a false success is worse than an honest failure, so
+    // an unreadable sw.js now fails this app loudly. (Found by testing
+    // 2026-09-20.)
+    let cacheName = null;
+    const swRes = await fetch('./' + app + '/sw.js?b=' + bust, { cache: 'no-store' });
+    if (!swRes.ok) throw new Error('sw.js HTTP ' + swRes.status);
+    const m = (await swRes.text()).match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
+    if (!m) throw new Error('no CACHE_NAME in sw.js');
+    cacheName = m[1];
 
     // Fetch fresh (cache-busted) so a re-tap really does refresh.
     const pageRes = await fetch('./' + app + '/index.html?b=' + bust, { cache: 'no-store' });
@@ -473,56 +498,53 @@
     return cacheName;
   }
 
+  // Downloads every tool, reporting progress in the banner at the top of the
+  // page. Progress used to be written into a panel at the bottom whose CSS
+  // was never written -- the bar was a zero-height div, so a download looked
+  // like nothing at all was happening. That panel is gone; this is the only
+  // place it reports now.
   async function cacheAllApps(){
-    const btn = document.getElementById('cacheAllBtn');
-    const bar = document.getElementById('cacheBar');
-    const fill = document.getElementById('cacheBarFill');
-    const status = document.getElementById('cacheStatus');
+    const btn = document.getElementById('up-btn');
 
     if (!('caches' in window)){
-      status.className = 'offline-status show offline-err';
-      status.innerHTML = 'This browser does not support offline storage. Open each tool once instead.';
-      return;
+      setStatus('This browser does not support offline storage. Open each tool once instead.', 'up-err');
+      return false;
     }
 
-    btn.disabled = true;
-    btn.textContent = 'Downloading...';
-    bar.classList.add('show');
-    status.className = 'offline-status show';
-    fill.style.width = '0%';
+    if (btn){ btn.disabled = true; btn.textContent = 'Saving\u2026'; }
+    setProgress(0);
 
     const bust = Date.now();
     const failed = [];
     let done = 0;
 
     for (const app of OFFLINE_APPS){
-      status.innerHTML = 'Saving ' + app.replace('ec225-', '') + '  (' + (done + 1) + ' of ' + OFFLINE_APPS.length + ')';
+      setStatus('Saving ' + app.replace('ec225-', '') + '  (' + (done + 1)
+        + ' of ' + OFFLINE_APPS.length + ')', '');
       try {
         await cacheOneApp(app, bust);
       } catch (e){
-        failed.push(app.replace('ec225-', '') + ' (' + e.message + ')');
+        failed.push(app.replace('ec225-', ''));
       }
       done++;
-      fill.style.width = Math.round(done / OFFLINE_APPS.length * 100) + '%';
+      setProgress(done / OFFLINE_APPS.length * 100);
     }
 
-    btn.disabled = false;
-    btn.textContent = 'Download All Tools for Offline';
+    if (btn){ btn.disabled = false; btn.textContent = 'Save All Tools for Offline Use'; }
 
     const ok = OFFLINE_APPS.length - failed.length;
     if (!failed.length){
-      status.className = 'offline-status show offline-ok';
-      status.innerHTML = 'All ' + ok + ' tools saved. They will now open without internet. '
-        + 'Re-tap before your next trip to pick up any updates.';
-    } else if (ok > 0){
-      status.className = 'offline-status show offline-warn';
-      status.innerHTML = ok + ' of ' + OFFLINE_APPS.length + ' saved. Could not save: ' + failed.join(', ')
-        + '. Check your connection and tap again.';
-    } else {
-      status.className = 'offline-status show offline-err';
-      status.innerHTML = 'Nothing could be saved &mdash; you may be offline already. '
-        + 'Connect to wi-fi and tap again.';
+      setStatus('All ' + ok + ' tools saved.', 'up-ok');
+      return true;
     }
+    if (ok > 0){
+      setStatus(ok + ' of ' + OFFLINE_APPS.length + ' saved. Could not save: '
+        + failed.join(', ') + '. Check your connection and tap again.', 'up-warn');
+      return false;
+    }
+    setStatus('Nothing could be saved &mdash; you may be offline already. '
+      + 'Connect to wi-fi and tap again.', 'up-err');
+    return false;
   }
 
   // -------------------------------------------------------------------
@@ -556,13 +578,35 @@
 
   function showBanner(cls, html){
     const el = document.getElementById('up-banner');
-    if (!el) return;
+    const content = document.getElementById('up-content');
+    if (!el || !content) return;
     el.className = 'up-banner show ' + cls;
-    el.innerHTML = html;
+    content.innerHTML = html;
   }
   function hideBanner(){
     const el = document.getElementById('up-banner');
-    if (el){ el.className = 'up-banner'; el.innerHTML = ''; }
+    const content = document.getElementById('up-content');
+    if (el) el.className = 'up-banner';
+    if (content) content.innerHTML = '';
+    setProgress(null);
+    setStatus('', '');
+  }
+
+  // --- progress, shown inside the banner ---
+  function setProgress(pct){
+    const bar = document.getElementById('up-bar');
+    const fill = document.getElementById('up-bar-fill');
+    if (!bar || !fill) return;
+    if (pct === null){ bar.classList.remove('show'); fill.style.width = '0%'; return; }
+    bar.classList.add('show');
+    fill.style.width = Math.max(0, Math.min(100, Math.round(pct))) + '%';
+  }
+  function setStatus(html, cls){
+    const el = document.getElementById('up-status');
+    if (!el) return;
+    if (!html){ el.className = 'up-status'; el.innerHTML = ''; return; }
+    el.className = 'up-status show ' + (cls || '');
+    el.innerHTML = html;
   }
 
   async function checkToolStatus(){
@@ -579,7 +623,9 @@
     }
 
     if (!reachable) return;                          // no network after all
+    setProgress(null);
     if (stale === 0){
+      setStatus('', '');
       showBanner('ok', 'All ' + OFFLINE_APPS.length
         + ' tools are saved on this device and up to date.');
       return;
@@ -595,8 +641,16 @@
         : 'This device is still running older copies of some tools. Features that span '
           + 'several tools can behave inconsistently until every one is updated.')
       + '</div>'
-      + '<button id="up-btn" onclick="updateEverything()">'
+      + '<button id="up-btn" onclick="' + (all ? 'saveAllNow()' : 'updateEverything()') + '">'
       + (all ? 'Save All Tools for Offline Use' : 'Update All Tools Now') + '</button>');
+  }
+
+  // Nothing is cached yet, so there is no stale copy to clear and no reason
+  // to reload -- just download, with the progress bar right here. Reloading
+  // for a first-time save would blank the page mid-tap for no benefit.
+  async function saveAllNow(){
+    const okAll = await cacheAllApps();
+    if (okAll) await checkToolStatus();
   }
 
   // One tap: clear everything, reload from the network, then re-download.
