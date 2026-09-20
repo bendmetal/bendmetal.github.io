@@ -107,6 +107,33 @@
     font-weight: 500;
   }
 
+  /* ---- offline status banner ---- */
+  .up-banner {
+    display: none; margin-bottom: 16px; padding: 14px 16px; border-radius: 10px;
+    font-size: 13px; line-height: 1.55;
+  }
+  .up-banner.show { display: block; }
+  .up-banner.stale {
+    background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.45); color: #fbbf24;
+  }
+  .up-banner.ok {
+    background: rgba(74,222,128,0.07); border: 1px solid rgba(74,222,128,0.28);
+    color: #4ade80; font-size: 12px; padding: 9px 14px;
+  }
+  .up-banner.busy {
+    background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.35); color: #58a6ff;
+  }
+  .up-banner .up-head { font-weight: 700; margin-bottom: 4px; }
+  .up-banner .up-sub { color: #c9d1d9; font-size: 12px; }
+  .up-banner button {
+    width: 100%; margin-top: 11px; padding: 12px 14px; border-radius: 8px;
+    font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+    background: #fbbf24; border: none; color: #1f2937;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .up-banner button:active { background: #f59e0b; }
+  .up-banner button:disabled { opacity: 0.6; }
+
   .info {
     margin-top: 24px;
     padding: 12px 14px;
@@ -230,6 +257,8 @@
     <strong>Use at your own risk.</strong> These calculators were built and checked by one person (me) — they have not been independently reviewed. Each tool includes the source chart it was built from so you can verify any result by hand. If you find something that looks wrong, please let me know.<br><br>
     Ideas for improvements are also welcome — email <a href="mailto:ghock@achi-tx.com">ghock@achi-tx.com</a>.
   </div>
+
+  <div class="up-banner" id="up-banner"></div>
 
   <div class="cards">
     <a class="card" href="./ec225-hover-v1/" style="border-color: #a371f7;">
@@ -496,6 +525,121 @@
     }
   }
 
+  // -------------------------------------------------------------------
+  // Offline status banner
+  //
+  // The problem this solves: after an update, a device still serving the
+  // cached copy runs old code. With features that span several tools -- the
+  // Cat A/B handoff, the remembered inputs -- a half-updated device makes the
+  // tools disagree with each other, which reads as a bug rather than a stale
+  // cache. Telling people "always refresh and download before use" was the
+  // other option, but a permanent instruction gets ignored by about the third
+  // reading, and it pushes the tool list down the page on every visit.
+  //
+  // So the page works it out instead. Each app's sw.js carries its current
+  // CACHE_NAME; if that named cache is missing, or holds no page, that app is
+  // stale on this device. Silent when everything is current, impossible to
+  // miss when it is not -- and ONE button, because a two-step "refresh then
+  // download" sequence is one people get out of order.
+  // -------------------------------------------------------------------
+  const UPDATE_PENDING_KEY = 'ec225-finish-update';
+
+  async function toolCacheState(app, bust){
+    const swRes = await fetch('./' + app + '/sw.js?b=' + bust, { cache: 'no-store' });
+    if (!swRes.ok) throw new Error('HTTP ' + swRes.status);
+    const m = (await swRes.text()).match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
+    if (!m) return { app: app, current: false };
+    const cache = await caches.open(m[1]);
+    const hit = await cache.match(new Request('./' + app + '/'));
+    return { app: app, current: !!hit };
+  }
+
+  function showBanner(cls, html){
+    const el = document.getElementById('up-banner');
+    if (!el) return;
+    el.className = 'up-banner show ' + cls;
+    el.innerHTML = html;
+  }
+  function hideBanner(){
+    const el = document.getElementById('up-banner');
+    if (el){ el.className = 'up-banner'; el.innerHTML = ''; }
+  }
+
+  async function checkToolStatus(){
+    if (!('caches' in window)) return;               // nothing to report
+    if (navigator.onLine === false) return;          // offline: say nothing alarming
+
+    let stale = 0, reachable = 0;
+    for (const app of OFFLINE_APPS){
+      try {
+        const st = await toolCacheState(app, Date.now());
+        reachable++;
+        if (!st.current) stale++;
+      } catch (e) { /* unreachable -- treat as unknown, not as stale */ }
+    }
+
+    if (!reachable) return;                          // no network after all
+    if (stale === 0){
+      showBanner('ok', 'All ' + OFFLINE_APPS.length
+        + ' tools are saved on this device and up to date.');
+      return;
+    }
+    const all = (stale === OFFLINE_APPS.length);
+    showBanner('stale',
+      '<div class="up-head">' + (all
+        ? 'Tools not saved for offline use yet'
+        : stale + ' of ' + OFFLINE_APPS.length + ' tools need updating') + '</div>'
+      + '<div class="up-sub">' + (all
+        ? 'Tap below to save all ' + OFFLINE_APPS.length + ' tools to this device so they work with no signal. '
+          + 'About 25\u00a0MB \u2014 do it on wi-fi.'
+        : 'This device is still running older copies of some tools. Features that span '
+          + 'several tools can behave inconsistently until every one is updated.')
+      + '</div>'
+      + '<button id="up-btn" onclick="updateEverything()">'
+      + (all ? 'Save All Tools for Offline Use' : 'Update All Tools Now') + '</button>');
+  }
+
+  // One tap: clear everything, reload from the network, then re-download.
+  // The reload is unavoidable (the landing page's own service worker has to be
+  // replaced), so a flag survives it and the download resumes on the way back.
+  async function updateEverything(){
+    const btn = document.getElementById('up-btn');
+    if (btn){ btn.disabled = true; btn.textContent = 'Updating\u2026'; }
+    try { sessionStorage.setItem(UPDATE_PENDING_KEY, '1'); } catch (e) {}
+    try {
+      if ('serviceWorker' in navigator){
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const r of regs) await r.unregister();
+      }
+      if ('caches' in window){
+        const keys = await caches.keys();
+        await Promise.all(keys.map(function(k){ return caches.delete(k); }));
+      }
+    } finally {
+      location.reload();
+    }
+  }
+
+  async function finishPendingUpdate(){
+    let pending = false;
+    try { pending = sessionStorage.getItem(UPDATE_PENDING_KEY) === '1'; } catch (e) {}
+    if (!pending) return false;
+    try { sessionStorage.removeItem(UPDATE_PENDING_KEY); } catch (e) {}
+    showBanner('busy', '<div class="up-head">Finishing the update\u2026</div>'
+      + '<div class="up-sub">Re-saving all ' + OFFLINE_APPS.length
+      + ' tools to this device. Keep this page open.</div>');
+    await cacheAllApps();
+    await checkToolStatus();
+    return true;
+  }
+
+  // Runs after the PIN gate, so the banner is never the first thing a locked
+  // device shows.
+  async function startStatusCheck(){
+    if (await finishPendingUpdate()) return;
+    await checkToolStatus();
+  }
+
   const PIN_CODE = '1356';
   const PIN_STORAGE_KEY = 'ec225-pin-ok';
   let pinEntry = '';
@@ -503,6 +647,8 @@
   function showApp() {
     document.getElementById('pin-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
+    // Check offline status once the tools are actually on screen.
+    setTimeout(function(){ startStatusCheck().catch(function(){}); }, 0);
   }
 
   function updatePinDots(errorState) {
