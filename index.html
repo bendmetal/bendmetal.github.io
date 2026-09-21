@@ -635,6 +635,22 @@
     return { app: app, current: !!hit };
   }
 
+  // Shown the instant the tool list appears, before any network call.
+  //
+  // Why amber and not neutral: the check takes a moment, and for those
+  // seconds an EMPTY banner area reads as "nothing to report" -- which is
+  // precisely the wrong default for a tool that warns you about stale
+  // copies. Greg watched a device sit clean-looking for ~15 seconds before
+  // the warning appeared, which is long enough to glance, conclude all is
+  // well, and walk away. So the page starts from "I do not know yet",
+  // coloured to be looked at, and can only resolve to green or to an
+  // actionable amber. It never resolves to nothing.
+  function showChecking(){
+    showBanner('stale', '<div class="up-head">Checking for updates\u2026</div>'
+      + '<div class="up-sub">Confirming this device has the current version of all '
+      + OFFLINE_APPS.length + ' tools and their source charts.</div>');
+  }
+
   function showBanner(cls, html){
     const el = document.getElementById('up-banner');
     const content = document.getElementById('up-content');
@@ -668,20 +684,44 @@
     el.innerHTML = html;
   }
 
-  async function checkToolStatus(){
-    if (!('caches' in window)) return;               // nothing to report
-    if (navigator.onLine === false) return;          // offline: say nothing alarming
+  // Resolved when the page genuinely cannot tell. Not green (that would claim
+  // everything is current, which is unknown) and not an alarm either.
+  function showUnknown(reason){
+    showBanner('busy', '<div class="up-head">Could not check for updates</div>'
+      + '<div class="up-sub">' + reason + ' The tools already saved on this device '
+      + 'will still open. Re-open this page on wi-fi to check.</div>');
+  }
 
-    let stale = 0, reachable = 0;
-    for (const app of OFFLINE_APPS){
-      try {
-        const st = await toolCacheState(app, Date.now());
-        reachable++;
-        if (!st.current) stale++;
-      } catch (e) { /* unreachable -- treat as unknown, not as stale */ }
+  async function checkToolStatus(){
+    if (!('caches' in window)){
+      showUnknown('This browser does not support offline storage.');
+      return;
+    }
+    if (navigator.onLine === false){
+      showUnknown('This device is offline.');
+      return;
     }
 
-    if (!reachable) return;                          // no network after all
+    // Checked in PARALLEL. Sequentially this was 15 round trips to GitHub
+    // Pages one after another -- about 15 seconds on a phone, which is what
+    // made the delay noticeable in the first place. The browser caps
+    // concurrent connections per host anyway, so this is a few waves rather
+    // than fifteen queues.
+    const results = await Promise.all(OFFLINE_APPS.map(async function(app){
+      try { return await toolCacheState(app, Date.now()); }
+      catch (e) { return null; }                     // unreachable: unknown, not stale
+    }));
+    let stale = 0, reachable = 0;
+    results.forEach(function(st){
+      if (!st) return;
+      reachable++;
+      if (!st.current) stale++;
+    });
+
+    if (!reachable){
+      showUnknown('None of the tools could be reached.');
+      return;
+    }
     // Charts are counted SEPARATELY from tools. Folding them into the tool
     // count produced "16 of 15 tools need updating" and stopped the
     // first-visit wording ever appearing, because the total could exceed
@@ -764,6 +804,7 @@
   // Runs after the PIN gate, so the banner is never the first thing a locked
   // device shows.
   async function startStatusCheck(){
+    showChecking();                                  // never leave the area blank
     if (await finishPendingUpdate()) return;
     await checkToolStatus();
   }
