@@ -458,6 +458,57 @@
   // Always re-downloads: this is a "prepare for the trip" button, so a stale
   // copy silently kept would defeat the purpose.
   // -------------------------------------------------------------------
+  // The 54 shared Section 10.2.A1 chart images (27 figures x 2 panels).
+  // They live once at /charts/ and are read by Cruise Torque, Max Endurance
+  // and both fuel planners, rather than being base64-inlined into each of the
+  // four -- which would put this download at ~53 MB instead of ~27 MB.
+  //
+  // They go in their OWN cache. Every app's service worker resolves requests
+  // with caches.match(), which searches every cache on the origin, so one
+  // copy here serves all four apps offline. No app's activate handler touches
+  // this cache either: each is scoped to its own '<name>-v' prefix, and none
+  // of them is 'ec225-charts-'.
+  const CHART_CACHE = 'ec225-charts-v1';
+  const CHART_FIGURES = 27;
+
+  function chartUrls(){
+    const out = [];
+    for (let i = 1; i <= CHART_FIGURES; i++){
+      const n = String(i).padStart(2, '0');
+      out.push('./charts/fig' + n + '-p1.jpg');
+      out.push('./charts/fig' + n + '-p2.jpg');
+    }
+    return out;
+  }
+
+  async function cacheCharts(bust, onProgress){
+    const cache = await caches.open(CHART_CACHE);
+    const urls = chartUrls();
+    let done = 0, failed = 0;
+    for (const u of urls){
+      try {
+        const res = await fetch(u + '?b=' + bust, { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        await cache.put(new Request(u), res);
+      } catch (e) { failed++; }
+      done++;
+      if (onProgress) onProgress(done, urls.length);
+    }
+    return { total: urls.length, failed: failed };
+  }
+
+  async function chartsCached(){
+    try {
+      const cache = await caches.open(CHART_CACHE);
+      // Spot-check rather than all 54: first, middle and last.
+      const probes = ['./charts/fig01-p1.jpg','./charts/fig14-p1.jpg','./charts/fig27-p2.jpg'];
+      for (const u of probes){
+        if (!(await cache.match(new Request(u)))) return false;
+      }
+      return true;
+    } catch (e) { return false; }
+  }
+
   const OFFLINE_APPS = [
     'ec225-ca-cat-a', 'ec225-ca-helipad', 'ec225-ca-helipad-takeoff',
     'ec225-cb-to-lnd', 'ec225-hover-v1', 'ec225-se-hi', 'ec225-se-ct',
@@ -517,6 +568,8 @@
     const bust = Date.now();
     const failed = [];
     let done = 0;
+    // 15 tools plus the 54 shared chart images, counted as one progress bar.
+    const totalSteps = OFFLINE_APPS.length + CHART_FIGURES * 2;
 
     for (const app of OFFLINE_APPS){
       setStatus('Saving ' + app.replace('ec225-', '') + '  (' + (done + 1)
@@ -527,8 +580,14 @@
         failed.push(app.replace('ec225-', ''));
       }
       done++;
-      setProgress(done / OFFLINE_APPS.length * 100);
+      setProgress(done / totalSteps * 100);
     }
+
+    const charts = await cacheCharts(bust, function(n, total){
+      setStatus('Saving source charts  (' + n + ' of ' + total + ')', '');
+      setProgress((OFFLINE_APPS.length + n) / totalSteps * 100);
+    });
+    if (charts.failed) failed.push(charts.failed + ' chart image(s)');
 
     if (btn){ btn.disabled = false; btn.textContent = 'Save All Tools for Offline Use'; }
 
@@ -623,26 +682,41 @@
     }
 
     if (!reachable) return;                          // no network after all
+    // Charts are counted SEPARATELY from tools. Folding them into the tool
+    // count produced "16 of 15 tools need updating" and stopped the
+    // first-visit wording ever appearing, because the total could exceed
+    // OFFLINE_APPS.length. (Caught by testing 2026-09-21.)
+    const chartsOk = await chartsCached();
     setProgress(null);
-    if (stale === 0){
+
+    if (stale === 0 && chartsOk){
       setStatus('', '');
       showBanner('ok', 'All ' + OFFLINE_APPS.length
-        + ' tools are saved on this device and up to date.');
+        + ' tools and their source charts are saved on this device and up to date.');
       return;
     }
-    const all = (stale === OFFLINE_APPS.length);
+
+    const nothingYet = (stale === OFFLINE_APPS.length && !chartsOk);
+    let head, sub;
+    if (nothingYet){
+      head = 'Tools not saved for offline use yet';
+      sub  = 'Tap below to save all ' + OFFLINE_APPS.length + ' tools and their source charts '
+           + 'to this device so they work with no signal. About 27\u00a0MB \u2014 do it on wi-fi.';
+    } else if (stale === 0){
+      head = 'Source charts not saved';
+      sub  = 'Every tool is current, but the Section 10.2.A1 charts are missing. '
+           + 'Cruise Torque, Max Endurance and both fuel planners will open offline '
+           + 'but will not be able to show you the chart behind a number.';
+    } else {
+      head = stale + ' of ' + OFFLINE_APPS.length + ' tools need updating';
+      sub  = 'This device is still running older copies of some tools. Features that span '
+           + 'several tools can behave inconsistently until every one is updated.'
+           + (chartsOk ? '' : ' The shared source charts are missing too.');
+    }
     showBanner('stale',
-      '<div class="up-head">' + (all
-        ? 'Tools not saved for offline use yet'
-        : stale + ' of ' + OFFLINE_APPS.length + ' tools need updating') + '</div>'
-      + '<div class="up-sub">' + (all
-        ? 'Tap below to save all ' + OFFLINE_APPS.length + ' tools to this device so they work with no signal. '
-          + 'About 25\u00a0MB \u2014 do it on wi-fi.'
-        : 'This device is still running older copies of some tools. Features that span '
-          + 'several tools can behave inconsistently until every one is updated.')
-      + '</div>'
-      + '<button id="up-btn" onclick="' + (all ? 'saveAllNow()' : 'updateEverything()') + '">'
-      + (all ? 'Save All Tools for Offline Use' : 'Update All Tools Now') + '</button>');
+      '<div class="up-head">' + head + '</div><div class="up-sub">' + sub + '</div>'
+      + '<button id="up-btn" onclick="' + (nothingYet ? 'saveAllNow()' : 'updateEverything()') + '">'
+      + (nothingYet ? 'Save All Tools for Offline Use' : 'Update All Tools Now') + '</button>');
   }
 
   // Nothing is cached yet, so there is no stale copy to clear and no reason
