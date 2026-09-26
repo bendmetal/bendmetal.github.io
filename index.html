@@ -423,7 +423,7 @@
           <span>Twin-Engine R/C at Vy<span class="beta-badge">BETA</span></span>
           <span class="arrow">›</span>
         </div>
-      <div class="card-desc">Rate of climb by altitude, OAT, and gross weight. Still air only, 0&ndash;10,000 ft.</div>
+      <div class="card-desc">Rate of climb by altitude, OAT, and gross weight. Still air only, &minus;2,000 to 20,000 ft.</div>
       <div class="card-meta">Fig 11b, Section 5.1.A1</div>
     </a>
   </div>
@@ -546,7 +546,26 @@
     const headers = { headers: { 'Content-Type': 'text/html' } };
     await cache.put(new Request('./' + app + '/'), new Response(body.slice(), headers));
     await cache.put(new Request('./' + app + '/index.html'), new Response(body.slice(), headers));
+
+    // Then delete this tool's OLDER copies. Each tool's service worker answers
+    // with caches.match(), which searches every cache on the origin and returns
+    // the first hit -- the oldest cache. So while an old copy survives, the
+    // tool opens as the OLD version even though the new one is saved right
+    // beside it, and offline it stays that way. Found 2026-09-26: after this
+    // page said "up to date", R/C at Vy still opened with the old Figure 11b,
+    // and some tools took three opens to come right.
+    for (const k of await olderCachesFor(cacheName)) await caches.delete(k);
     return cacheName;
+  }
+
+  // Other versions of the same tool's cache: 'ec225-rc-vy-v9' -> any other
+  // 'ec225-rc-vy-v<N>'. Anchored on the digits, so 'ec225-ca-helipad-v15'
+  // never matches 'ec225-ca-helipad-takeoff-v13'.
+  async function olderCachesFor(cacheName){
+    const m = String(cacheName).match(/^(.*-v)\d+$/);
+    if (!m) return [];
+    const re = new RegExp('^' + m[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\d+$');
+    return (await caches.keys()).filter(function(k){ return k !== cacheName && re.test(k); });
   }
 
   // Downloads every tool, reporting progress in the banner at the top of the
@@ -629,10 +648,18 @@
     const swRes = await fetch('./' + app + '/sw.js?b=' + bust, { cache: 'no-store' });
     if (!swRes.ok) throw new Error('HTTP ' + swRes.status);
     const m = (await swRes.text()).match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
-    if (!m) return { app: app, current: false };
-    const cache = await caches.open(m[1]);
-    const hit = await cache.match(new Request('./' + app + '/'));
-    return { app: app, current: !!hit };
+    if (!m) return { app: app, current: false, older: 0 };
+    // caches.has() first: caches.open() would CREATE an empty cache just by
+    // looking, leaving a stray entry behind on every check.
+    const hit = (await caches.has(m[1]))
+      ? await (await caches.open(m[1])).match(new Request('./' + app + '/'))
+      : null;
+    // An older copy still on the device counts as NOT current, even when the
+    // new one is saved too: the tool's service worker finds the old one first
+    // (see cacheOneApp). This is what let the banner go green on 2026-09-26
+    // while R/C at Vy still opened as the old build.
+    const older = (await olderCachesFor(m[1])).length;
+    return { app: app, current: !!hit && older === 0, older: older };
   }
 
   // Shown the instant the tool list appears, before any network call.
@@ -736,7 +763,13 @@
       return;
     }
 
-    const nothingYet = (stale === OFFLINE_APPS.length && !chartsOk);
+    // "Not saved yet" only when there is truly nothing -- no copy of any tool,
+    // old or new. It used to be "every tool stale", which also described a
+    // device holding OLD copies of everything; that sent it down the plain-save
+    // path, which never cleared the old copies or their service workers. A
+    // device with any old copy now gets the full Update path, which does.
+    const anyCopy = results.some(function(st){ return st && (st.current || st.older > 0); });
+    const nothingYet = (stale === OFFLINE_APPS.length && !chartsOk && !anyCopy);
     let head, sub;
     if (nothingYet){
       head = 'Tools not saved for offline use yet';
