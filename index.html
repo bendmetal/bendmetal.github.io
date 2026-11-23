@@ -916,7 +916,38 @@
     if (alreadyUnlocked) showApp();
   })();
 
+  // ---------- show a new version as soon as it has downloaded ----------
+  // SAME FUNCTION as in ec225-workspace/index.html -- keep the two identical
+  // (_tests/2026-11-23-update-reload-and-print.js compares them).
+  // The page always opens from its saved copy (that is what makes it work offline),
+  // so after an update the OLD version showed until the next visit. When the new
+  // service worker takes over (it calls skipWaiting + clients.claim), reload once.
+  //   - not on a first install (no previous controller): nothing old is showing
+  //   - not while the page says it is busy (e.g. saving tools for offline)
+  //   - at most once per 15 s, so it can never loop
+  function ec225ReloadOnUpdate(sw, store, reload, isBusy){
+    if (!sw || !sw.addEventListener) return false;
+    const hadController = !!sw.controller;
+    let done = false;
+    sw.addEventListener('controllerchange', function(){
+      if (!hadController || done) return;
+      if (isBusy && isBusy()) return;
+      let last = 0;
+      try { last = Number(store.getItem('ec225-sw-reloaded-at') || 0); } catch (e) {}
+      if (Date.now() - last < 15000) return;
+      try { store.setItem('ec225-sw-reloaded-at', String(Date.now())); } catch (e) {}
+      done = true;
+      reload();
+    });
+    return true;
+  }
+
   if ('serviceWorker' in navigator) {
+    let ss = null; try { ss = sessionStorage; } catch (e) {}
+    // busy = the Save / Update button is mid-run: never reload under a save in progress
+    ec225ReloadOnUpdate(navigator.serviceWorker, ss, function(){ location.reload(); }, function(){
+      const b = document.getElementById('up-btn'); return !!(b && b.disabled);
+    });
     window.addEventListener('load', function() {
       navigator.serviceWorker.register('sw.js').catch(function() {});
     });

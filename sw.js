@@ -1,7 +1,7 @@
 // EC225 Flight Tools Landing - Service Worker
 // Caches the landing page for offline use
 
-const CACHE_NAME = 'ec225-landing-v26';
+const CACHE_NAME = 'ec225-landing-v27';
 const FILES_TO_CACHE = [
   './',
   './index.html'
@@ -10,7 +10,10 @@ const FILES_TO_CACHE = [
 self.addEventListener('install', function(event) {
   event.waitUntil(
     caches.open(CACHE_NAME).then(function(cache) {
-      return cache.addAll(FILES_TO_CACHE);
+      // cache:'reload' -- fetch the page fresh from the network, never from the
+      // browser's own HTTP cache (GitHub Pages allows 10 minutes), or a new
+      // version could install holding the OLD page. (2026-11-23)
+      return cache.addAll(FILES_TO_CACHE.map(function(u){ return new Request(u, { cache: 'reload' }); }));
     })
   );
   self.skipWaiting();
